@@ -73,11 +73,36 @@ sub process_job {
 
     if ($result < 0.80) {
         print "Result: SUCCESS\n";
-
         return 1;
     }
 
     print "Result: FAILURE\n";
+    return 0;
+}
+
+# ------------------------------------------------------------
+# Process a job with retry logic
+# ------------------------------------------------------------
+
+sub process_with_retry {
+    my ($job, $max_attempts) = @_;
+
+    for my $attempt (1 .. $max_attempts) {
+
+        print "\nAttempt $attempt/$max_attempts for $job->{job_id}\n";
+
+        my $success = process_job($job);
+
+        if ($success) {
+            return 1;
+        }
+
+        if ($attempt < $max_attempts) {
+            print "Job $job->{job_id} failed. Retrying...\n";
+        }
+    }
+
+    print "Job $job->{job_id} failed after $max_attempts attempts.\n";
 
     return 0;
 }
@@ -154,10 +179,11 @@ print "\nStarting job processing...\n";
 
 my $successful_jobs = 0;
 my $failed_jobs     = 0;
+my $max_attempts    = 3;
 
 for my $job (@valid_jobs) {
 
-    my $success = process_job($job);
+    my $success = process_with_retry($job, $max_attempts);
 
     if ($success) {
         $successful_jobs++;
