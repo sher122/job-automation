@@ -5,13 +5,23 @@ use warnings;
 use JSON::PP;
 
 # ------------------------------------------------------------
+# Priority configuration
+# ------------------------------------------------------------
+
+my %priority_order = (
+    critical => 1,
+    high     => 2,
+    medium   => 3,
+    low      => 4
+);
+
+# ------------------------------------------------------------
 # Validate a single job
 # ------------------------------------------------------------
 
 sub validate_job {
     my ($job) = @_;
 
-    # Required fields that every job must contain
     my @required_fields = (
         "job_id",
         "priority",
@@ -19,14 +29,12 @@ sub validate_job {
         "submitted_at"
     );
 
-    # Check that every required field exists
     for my $field (@required_fields) {
         unless (exists $job->{$field}) {
             return (0, "Missing required field: $field");
         }
     }
 
-    # Valid priority values
     my %valid_priorities = (
         critical => 1,
         high     => 1,
@@ -34,7 +42,6 @@ sub validate_job {
         low      => 1
     );
 
-    # Check whether the job priority is valid
     unless (exists $valid_priorities{$job->{priority}}) {
         return (0, "Invalid priority: $job->{priority}");
     }
@@ -62,12 +69,10 @@ print "Starting $project_name\n";
 open(my $file_handle, "<", $job_file)
     or die "Cannot open $job_file: $!\n";
 
-# Read the complete file
 local $/;
 
 my $json_text = <$file_handle>;
 
-# Close the file
 close($file_handle);
 
 # ------------------------------------------------------------
@@ -76,26 +81,47 @@ close($file_handle);
 
 my $jobs = decode_json($json_text);
 
-# ------------------------------------------------------------
-# Count jobs
-# ------------------------------------------------------------
-
 my $job_count = scalar(@{$jobs});
 
 print "Loaded $job_count jobs\n";
 
 # ------------------------------------------------------------
-# Validate each job
+# Validate jobs
 # ------------------------------------------------------------
+
+my @valid_jobs;
 
 for my $job (@{$jobs}) {
 
     my ($valid, $message) = validate_job($job);
 
     if ($valid) {
-        print "$job->{job_id}: VALID\n";
+        push @valid_jobs, $job;
     }
     else {
         print "$job->{job_id}: INVALID - $message\n";
     }
+}
+
+# ------------------------------------------------------------
+# Sort valid jobs by priority
+# ------------------------------------------------------------
+
+@valid_jobs = sort {
+    $priority_order{$a->{priority}}
+        <=>
+    $priority_order{$b->{priority}}
+} @valid_jobs;
+
+# ------------------------------------------------------------
+# Display processing order
+# ------------------------------------------------------------
+
+print "\nJob processing order:\n";
+
+for my $job (@valid_jobs) {
+
+    print "$job->{job_id} | ";
+    print "priority=$job->{priority} | ";
+    print "type=$job->{type}\n";
 }
