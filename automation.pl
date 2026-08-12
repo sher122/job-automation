@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 use JSON::PP;
+use Time::HiRes qw(sleep);
 
 # ------------------------------------------------------------
 # Priority configuration
@@ -47,6 +48,38 @@ sub validate_job {
     }
 
     return (1, "Valid");
+}
+
+# ------------------------------------------------------------
+# Simulate processing a single job
+# ------------------------------------------------------------
+
+sub process_job {
+    my ($job) = @_;
+
+    print "\nProcessing job $job->{job_id}\n";
+    print "Priority: $job->{priority}\n";
+    print "Type: $job->{type}\n";
+
+    # Simulate processing time between 1 and 3 seconds
+    my $processing_time = 1 + int(rand(3));
+
+    print "Processing for $processing_time seconds...\n";
+
+    sleep($processing_time);
+
+    # Simulate approximately 80% success rate
+    my $result = rand();
+
+    if ($result < 0.80) {
+        print "Result: SUCCESS\n";
+
+        return 1;
+    }
+
+    print "Result: FAILURE\n";
+
+    return 0;
 }
 
 # ------------------------------------------------------------
@@ -114,14 +147,30 @@ for my $job (@{$jobs}) {
 } @valid_jobs;
 
 # ------------------------------------------------------------
-# Display processing order
+# Process jobs
 # ------------------------------------------------------------
 
-print "\nJob processing order:\n";
+print "\nStarting job processing...\n";
+
+my $successful_jobs = 0;
+my $failed_jobs     = 0;
 
 for my $job (@valid_jobs) {
 
-    print "$job->{job_id} | ";
-    print "priority=$job->{priority} | ";
-    print "type=$job->{type}\n";
+    my $success = process_job($job);
+
+    if ($success) {
+        $successful_jobs++;
+    }
+    else {
+        $failed_jobs++;
+    }
 }
+
+# ------------------------------------------------------------
+# Processing summary
+# ------------------------------------------------------------
+
+print "\nProcessing summary:\n";
+print "Successful jobs: $successful_jobs\n";
+print "Failed jobs:     $failed_jobs\n";
