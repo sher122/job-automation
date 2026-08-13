@@ -5,12 +5,7 @@ use warnings;
 use JSON::PP;
 use Time::HiRes qw(sleep);
 
-# ------------------------------------------------------------
-# Priority configuration
-#
-# Lower number = higher priority.
-# ------------------------------------------------------------
-
+# Priority ranking: lower number means higher priority.
 my %priority_order = (
     critical => 1,
     high     => 2,
@@ -18,10 +13,14 @@ my %priority_order = (
     low      => 4
 );
 
-# ------------------------------------------------------------
-# Validate a single job
-# ------------------------------------------------------------
+# Default application configuration.
+my %default_config = (
+    job_file      => "jobs/jobs.json",
+    log_directory => "logs",
+    log_file      => "logs/job_results.csv",
+);
 
+# Validate one job record.
 sub validate_job {
     my ($job) = @_;
 
@@ -47,7 +46,6 @@ sub validate_job {
     );
 
     unless (exists $valid_priorities{$job->{priority}}) {
-
         return (
             0,
             "Invalid priority: $job->{priority}"
@@ -57,14 +55,7 @@ sub validate_job {
     return (1, "Valid");
 }
 
-# ------------------------------------------------------------
-# Sort jobs by priority
-#
-# Priority order:
-#
-# critical → high → medium → low
-# ------------------------------------------------------------
-
+# Sort jobs from highest to lowest priority.
 sub sort_jobs_by_priority {
     my (@jobs) = @_;
 
@@ -77,18 +68,15 @@ sub sort_jobs_by_priority {
     return @sorted_jobs;
 }
 
-# ------------------------------------------------------------
-# Simulate processing a single job
+# Simulate processing one job.
 #
-# Normal execution:
-#   Random success/failure.
+# During tests, an optional array reference can provide deterministic
+# results:
 #
-# Testing:
-#   Optional deterministic result sequence.
-#   0 = FAILURE
-#   1 = SUCCESS
-# ------------------------------------------------------------
-
+# 0 = FAILURE
+# 1 = SUCCESS
+#
+# Normal execution uses random success/failure.
 sub process_job {
     my ($job, $test_results) = @_;
 
@@ -96,29 +84,18 @@ sub process_job {
     print "Priority: $job->{priority}\n";
     print "Type: $job->{type}\n";
 
-    # --------------------------------------------------------
-    # Deterministic testing mode
-    # --------------------------------------------------------
-
     if (defined $test_results && @{$test_results}) {
 
         my $test_result = shift @{$test_results};
 
         if ($test_result) {
-
             print "Result: SUCCESS\n";
-
             return 1;
         }
 
         print "Result: FAILURE\n";
-
         return 0;
     }
-
-    # --------------------------------------------------------
-    # Normal simulation mode
-    # --------------------------------------------------------
 
     my $processing_time = 1 + int(rand(3));
 
@@ -126,14 +103,8 @@ sub process_job {
 
     sleep($processing_time);
 
-    # Approximately 80% success rate
-
-    my $result = rand();
-
-    if ($result < 0.80) {
-
+    if (rand() < 0.80) {
         print "Result: SUCCESS\n";
-
         return 1;
     }
 
@@ -142,10 +113,7 @@ sub process_job {
     return 0;
 }
 
-# ------------------------------------------------------------
-# Log a job processing result
-# ------------------------------------------------------------
-
+# Write one processing attempt to the CSV log.
 sub log_result {
     my ($log_file, $job, $attempt, $status) = @_;
 
@@ -160,10 +128,7 @@ sub log_result {
     close($log_handle);
 }
 
-# ------------------------------------------------------------
-# Process a job with retry logic
-# ------------------------------------------------------------
-
+# Process a job with a bounded retry policy.
 sub process_with_retry {
     my ($job, $max_attempts, $log_file, $test_results) = @_;
 
@@ -171,23 +136,10 @@ sub process_with_retry {
 
         print "\nAttempt $attempt/$max_attempts for $job->{job_id}\n";
 
-        my $success;
-
-        if (defined $test_results) {
-
-            $success = process_job(
-                $job,
-                $test_results
-            );
-        }
-        else {
-
-            $success = process_job($job);
-        }
-
-        # ----------------------------------------------------
-        # Successful attempt
-        # ----------------------------------------------------
+        my $success = process_job(
+            $job,
+            $test_results
+        );
 
         if ($success) {
 
@@ -201,10 +153,6 @@ sub process_with_retry {
             return 1;
         }
 
-        # ----------------------------------------------------
-        # Failed attempt
-        # ----------------------------------------------------
-
         log_result(
             $log_file,
             $job,
@@ -213,15 +161,10 @@ sub process_with_retry {
         );
 
         if ($attempt < $max_attempts) {
-
             print
                 "Job $job->{job_id} failed. Retrying...\n";
         }
     }
-
-    # --------------------------------------------------------
-    # Maximum attempts exhausted
-    # --------------------------------------------------------
 
     print
         "Job $job->{job_id} failed after $max_attempts attempts.\n";
@@ -229,31 +172,22 @@ sub process_with_retry {
     return 0;
 }
 
-# ------------------------------------------------------------
-# Main application
-# ------------------------------------------------------------
-
-sub main {
-
-    # --------------------------------------------------------
-    # Configuration
-    # --------------------------------------------------------
+# Run the application workflow.
+#
+# This function contains operations that may fail because of
+# filesystem or input errors.
+sub run_application {
+    my ($runtime_config) = @_;
 
     my $project_name  = "Job Automation Tool";
-    my $job_file      = "jobs/jobs.json";
-    my $log_directory = "logs";
-    my $log_file      = "$log_directory/job_results.csv";
-
-    # --------------------------------------------------------
-    # Start application
-    # --------------------------------------------------------
+    my $job_file      = $runtime_config->{job_file};
+    my $log_directory = $runtime_config->{log_directory};
+    my $log_file      = $runtime_config->{log_file};
+    my $test_results  = $runtime_config->{test_results};
 
     print "Starting $project_name\n";
 
-    # --------------------------------------------------------
-    # Create log directory
-    # --------------------------------------------------------
-
+    # Create the log directory if necessary.
     unless (-d $log_directory) {
 
         mkdir($log_directory)
@@ -261,10 +195,7 @@ sub main {
                 "Cannot create log directory $log_directory: $!\n";
     }
 
-    # --------------------------------------------------------
-    # Create log file
-    # --------------------------------------------------------
-
+    # Create the log file if necessary.
     unless (-e $log_file) {
 
         open(my $log_handle, ">", $log_file)
@@ -277,10 +208,7 @@ sub main {
         close($log_handle);
     }
 
-    # --------------------------------------------------------
-    # Open job input
-    # --------------------------------------------------------
-
+    # Read the job file.
     open(my $file_handle, "<", $job_file)
         or die
             "Cannot open $job_file: $!\n";
@@ -291,20 +219,43 @@ sub main {
 
     close($file_handle);
 
-    # --------------------------------------------------------
-    # Decode JSON
-    # --------------------------------------------------------
+    # Parse JSON inside its own error boundary so that we can
+    # provide a useful application-level message.
+    my $jobs;
 
-    my $jobs = decode_json($json_text);
+    {
+        local $@;
+
+        eval {
+            $jobs = decode_json($json_text);
+            1;
+        }
+        or do {
+            my $json_error = $@;
+
+            chomp $json_error;
+
+            # Remove the low-level Perl source location from the
+            # message. The application should report the problem,
+            # not expose an internal source-code location.
+            $json_error =~ s/\s+at\s+.*\s+line\s+\d+\.\s*$//;
+
+            die
+                "Invalid JSON in $job_file: $json_error\n";
+        };
+    }
+
+    # The job file must contain a JSON array.
+    unless (ref($jobs) eq "ARRAY") {
+        die
+            "Invalid job file $job_file: root element must be a JSON array\n";
+    }
 
     my $job_count = scalar(@{$jobs});
 
     print "Loaded $job_count jobs\n";
 
-    # --------------------------------------------------------
-    # Validate jobs
-    # --------------------------------------------------------
-
+    # Validate jobs.
     my @valid_jobs;
 
     my $invalid_job_count = 0;
@@ -326,16 +277,9 @@ sub main {
         }
     }
 
-    # --------------------------------------------------------
-    # Sort valid jobs by priority
-    # --------------------------------------------------------
-
+    # Sort valid jobs by priority.
     @valid_jobs =
         sort_jobs_by_priority(@valid_jobs);
-
-    # --------------------------------------------------------
-    # Process jobs
-    # --------------------------------------------------------
 
     print "\nStarting job processing...\n";
 
@@ -348,22 +292,17 @@ sub main {
         my $success = process_with_retry(
             $job,
             $max_attempts,
-            $log_file
+            $log_file,
+            $test_results
         );
 
         if ($success) {
-
             $successful_jobs++;
         }
         else {
-
             $failed_jobs++;
         }
     }
-
-    # --------------------------------------------------------
-    # Processing summary
-    # --------------------------------------------------------
 
     print "\nProcessing summary:\n";
 
@@ -376,33 +315,71 @@ sub main {
     print
         "Invalid jobs:    $invalid_job_count\n";
 
-    # --------------------------------------------------------
-    # Application exit status
-    #
-    # 0 = success
-    # 1 = job/application failure
-    # --------------------------------------------------------
-
+    # Exit code 1 means the application completed, but
+    # the job run contained invalid or failed jobs.
     if (
         $invalid_job_count > 0
         ||
         $failed_jobs > 0
     ) {
-
         return 1;
     }
 
+    # Exit code 0 means the application completed successfully.
     return 0;
 }
 
-# ------------------------------------------------------------
-# Execute main() only when the file is run directly.
+# Public application entry point.
 #
-# This allows test files to load the functions without
-# automatically starting the application.
-# ------------------------------------------------------------
+# Runtime/application errors are converted into exit code 2.
+sub main {
+    my ($config) = @_;
 
+    my %runtime_config = %default_config;
+
+    if (defined $config) {
+
+        %runtime_config = (
+            %runtime_config,
+            %{$config}
+        );
+    }
+
+    my $exit_code;
+    my $error_message;
+
+    {
+        local $@;
+
+        eval {
+            $exit_code = run_application(
+                \%runtime_config
+            );
+
+            1;
+        }
+        or do {
+            $error_message = $@;
+        };
+    }
+
+    # Application error.
+    if (defined $error_message) {
+
+        chomp $error_message;
+
+        print STDERR
+            "Application error: $error_message\n";
+
+        return 2;
+    }
+
+    return $exit_code;
+}
+
+# Only execute the application when this file is run directly.
+#
+# When required by tests, main() is not automatically executed.
 unless (caller) {
-
     exit main();
 }
