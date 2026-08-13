@@ -4,126 +4,187 @@ use strict;
 use warnings;
 use Test::More;
 use FindBin qw($Bin);
-use File::Temp qw(tempfile);
+use File::Temp qw(tempdir);
 
 require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
-# Test job
+# Test setup
 # ------------------------------------------------------------
 
-my $test_job = {
-    job_id       => "TEST-RETRY-001",
-    priority     => "high",
-    type         => "etch",
-    submitted_at => "2026-08-13T10:00:00"
+my $temp_dir = tempdir(CLEANUP => 1);
+
+my $log_file =
+    "$temp_dir/retry_results.csv";
+
+my $job = {
+    job_id      => "TEST-RETRY-001",
+    priority    => "high",
+    type        => "etch",
+    submitted_at => "2026-08-13T10:00:00Z"
 };
 
 # ------------------------------------------------------------
-# Create temporary log file
+# Test 1:
+# A fake executor lets us deterministically simulate:
 #
-# The test should not modify the real production log.
-# ------------------------------------------------------------
-
-my ($log_handle, $log_file) = tempfile();
-
-close($log_handle);
-
-# ------------------------------------------------------------
-# TEST 1
+# FAILURE
+# FAILURE
+# SUCCESS
 #
-# Expected:
-#
-# Attempt 1 -> FAILURE
-# Attempt 2 -> FAILURE
-# Attempt 3 -> SUCCESS
-# Final result -> SUCCESS
+# without relying on rand().
 # ------------------------------------------------------------
 
-my @retry_results = (0, 0, 1);
+{
+    my @results = (
+        0,
+        0,
+        1
+    );
 
-my $success = process_with_retry(
-    $test_job,
-    3,
-    $log_file,
-    \@retry_results
-);
+    my $fake_executor = sub {
+        my ($job) = @_;
 
-ok(
-    $success,
-    "Job succeeds after retrying"
-);
+        return shift @results;
+    };
 
-# ------------------------------------------------------------
-# Read the generated test log
-# ------------------------------------------------------------
+    my $success = process_with_retry(
+        $job,
+        3,
+        $log_file,
+        $fake_executor
+    );
 
-open(my $read_handle, "<", $log_file)
-    or die "Cannot open test log: $!";
-
-my @lines = <$read_handle>;
-
-close($read_handle);
-
-# ------------------------------------------------------------
-# Verify that exactly three attempts were logged
-# ------------------------------------------------------------
-
-is(
-    scalar(@lines),
-    3,
-    "Three attempts were logged"
-);
+    ok(
+        $success,
+        "Job succeeds after retrying"
+    );
+}
 
 # ------------------------------------------------------------
-# Verify attempt results
+# Test 2:
+# Three attempts must be logged.
 # ------------------------------------------------------------
 
-like(
-    $lines[0],
-    qr/,1,FAILURE$/,
-    "First attempt logged as FAILURE"
-);
+{
+    open(
+        my $handle,
+        "<",
+        $log_file
+    ) or die "Cannot open test log: $!";
 
-like(
-    $lines[1],
-    qr/,2,FAILURE$/,
-    "Second attempt logged as FAILURE"
-);
+    my @lines = <$handle>;
 
-like(
-    $lines[2],
-    qr/,3,SUCCESS$/,
-    "Third attempt logged as SUCCESS"
-);
+    close($handle);
 
-# ------------------------------------------------------------
-# TEST 2
-#
-# Expected:
-#
-# Attempt 1 -> FAILURE
-# Attempt 2 -> FAILURE
-# Attempt 3 -> FAILURE
-# Final result -> FAILURE
-# ------------------------------------------------------------
-
-my @failure_results = (0, 0, 0);
-
-my $permanent_failure = process_with_retry(
-    $test_job,
-    3,
-    $log_file,
-    \@failure_results
-);
-
-ok(
-    !$permanent_failure,
-    "Job fails after maximum retry attempts"
-);
+    is(
+        scalar(@lines),
+        3,
+        "Three attempts were logged"
+    );
+}
 
 # ------------------------------------------------------------
-# Finish test suite
+# Test 3:
+# First attempt was a failure.
 # ------------------------------------------------------------
+
+{
+    open(
+        my $handle,
+        "<",
+        $log_file
+    ) or die "Cannot open test log: $!";
+
+    my @lines = <$handle>;
+
+    close($handle);
+
+    like(
+        $lines[0],
+        qr/,1,FAILURE$/,
+        "First attempt logged as FAILURE"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 4:
+# Second attempt was a failure.
+# ------------------------------------------------------------
+
+{
+    open(
+        my $handle,
+        "<",
+        $log_file
+    ) or die "Cannot open test log: $!";
+
+    my @lines = <$handle>;
+
+    close($handle);
+
+    like(
+        $lines[1],
+        qr/,2,FAILURE$/,
+        "Second attempt logged as FAILURE"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 5:
+# Third attempt succeeded.
+# ------------------------------------------------------------
+
+{
+    open(
+        my $handle,
+        "<",
+        $log_file
+    ) or die "Cannot open test log: $!";
+
+    my @lines = <$handle>;
+
+    close($handle);
+
+    like(
+        $lines[2],
+        qr/,3,SUCCESS$/,
+        "Third attempt logged as SUCCESS"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 6:
+# A fake executor can force permanent failure.
+# ------------------------------------------------------------
+
+{
+    my $failure_log =
+        "$temp_dir/permanent_failure.csv";
+
+    my @results = (
+        0,
+        0,
+        0
+    );
+
+    my $fake_executor = sub {
+        my ($job) = @_;
+
+        return shift @results;
+    };
+
+    my $success = process_with_retry(
+        $job,
+        3,
+        $failure_log,
+        $fake_executor
+    );
+
+    ok(
+        !$success,
+        "Job fails after maximum retry attempts"
+    );
+}
 
 done_testing();

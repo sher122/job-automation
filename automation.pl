@@ -11,7 +11,10 @@ Getopt::Long::Configure(
     "no_auto_abbrev"
 );
 
-# Priority ranking: lower number means higher priority.
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+
 my %priority_order = (
     critical => 1,
     high     => 2,
@@ -19,7 +22,6 @@ my %priority_order = (
     low      => 4
 );
 
-# Default application configuration.
 my %default_config = (
     job_file      => "jobs/jobs.json",
     log_directory => "logs",
@@ -69,7 +71,9 @@ sub parse_cli {
 
     if (defined $success_rate) {
 
-        unless ($success_rate =~ /\A(?:0(?:\.\d+)?|1(?:\.0+)?)\z/) {
+        unless ($success_rate =~
+            /\A(?:0(?:\.\d+)?|1(?:\.0+)?)\z/
+        ) {
             die
                 "Invalid success rate: $success_rate. " .
                 "Expected a value between 0.0 and 1.0\n";
@@ -126,13 +130,44 @@ sub validate_job {
 sub sort_jobs_by_priority {
     my (@jobs) = @_;
 
-    my @sorted_jobs = sort {
+    return sort {
         $priority_order{$a->{priority}}
             <=>
         $priority_order{$b->{priority}}
     } @jobs;
+}
 
-    return @sorted_jobs;
+# ------------------------------------------------------------
+# Default production executor
+#
+# The executor closes over success_rate.
+#
+# This keeps the executor interface simple:
+#
+#     $executor->($job)
+#
+# Tests can replace this executor with a deterministic fake.
+# ------------------------------------------------------------
+
+sub create_default_executor {
+    my ($success_rate) = @_;
+
+    return sub {
+        my ($job) = @_;
+
+        my $processing_time = 1 + int(rand(3));
+
+        print
+            "Processing for $processing_time seconds...\n";
+
+        sleep($processing_time);
+
+        if (rand() < $success_rate) {
+            return 1;
+        }
+
+        return 0;
+    };
 }
 
 # ------------------------------------------------------------
@@ -140,32 +175,15 @@ sub sort_jobs_by_priority {
 # ------------------------------------------------------------
 
 sub process_job {
-    my ($job, $test_results, $success_rate) = @_;
+    my ($job, $executor) = @_;
 
     print "\nProcessing job $job->{job_id}\n";
     print "Priority: $job->{priority}\n";
     print "Type: $job->{type}\n";
 
-    if (defined $test_results && @{$test_results}) {
+    my $success = $executor->($job);
 
-        my $test_result = shift @{$test_results};
-
-        if ($test_result) {
-            print "Result: SUCCESS\n";
-            return 1;
-        }
-
-        print "Result: FAILURE\n";
-        return 0;
-    }
-
-    my $processing_time = 1 + int(rand(3));
-
-    print "Processing for $processing_time seconds...\n";
-
-    sleep($processing_time);
-
-    if (rand() < $success_rate) {
+    if ($success) {
         print "Result: SUCCESS\n";
         return 1;
     }
@@ -176,7 +194,7 @@ sub process_job {
 }
 
 # ------------------------------------------------------------
-# CSV serialization
+# CSV escaping
 # ------------------------------------------------------------
 
 sub csv_escape {
@@ -218,7 +236,8 @@ sub log_result {
         map { csv_escape($_) } @fields;
 
     open(my $log_handle, ">>", $log_file)
-        or die "Cannot open log file $log_file: $!\n";
+        or die
+            "Cannot open log file $log_file: $!\n";
 
     print $log_handle
         join(",", @escaped_fields) . "\n";
@@ -235,8 +254,7 @@ sub process_with_retry {
         $job,
         $max_attempts,
         $log_file,
-        $test_results,
-        $success_rate
+        $executor
     ) = @_;
 
     for my $attempt (1 .. $max_attempts) {
@@ -247,8 +265,7 @@ sub process_with_retry {
 
         my $success = process_job(
             $job,
-            $test_results,
-            $success_rate
+            $executor
         );
 
         if ($success) {
@@ -277,7 +294,8 @@ sub process_with_retry {
     }
 
     print
-        "Job $job->{job_id} failed after $max_attempts attempts.\n";
+        "Job $job->{job_id} failed after " .
+        "$max_attempts attempts.\n";
 
     return 0;
 }
@@ -293,8 +311,15 @@ sub run_application {
     my $job_file      = $runtime_config->{job_file};
     my $log_directory = $runtime_config->{log_directory};
     my $log_file      = $runtime_config->{log_file};
-    my $test_results  = $runtime_config->{test_results};
     my $success_rate  = $runtime_config->{success_rate};
+
+    # Dependency injection:
+    # use a supplied executor in tests, otherwise create
+    # the real production executor.
+    my $executor =
+        $runtime_config->{executor}
+        ||
+        create_default_executor($success_rate);
 
     print "Starting $project_name\n";
 
@@ -302,14 +327,16 @@ sub run_application {
 
         mkdir($log_directory)
             or die
-                "Cannot create log directory $log_directory: $!\n";
+                "Cannot create log directory " .
+                "$log_directory: $!\n";
     }
 
     unless (-e $log_file) {
 
         open(my $log_handle, ">", $log_file)
             or die
-                "Cannot create log file $log_file: $!\n";
+                "Cannot create log file " .
+                "$log_file: $!\n";
 
         print $log_handle
             "timestamp,job_id,priority,type,attempt,status\n";
@@ -345,7 +372,8 @@ sub run_application {
                 s/\s+at\s+.*\s+line\s+\d+\.\s*$//;
 
             die
-                "Invalid JSON in $job_file: $json_error\n";
+                "Invalid JSON in $job_file: " .
+                "$json_error\n";
         };
     }
 
@@ -360,12 +388,12 @@ sub run_application {
     print "Loaded $job_count jobs\n";
 
     my @valid_jobs;
-
     my $invalid_job_count = 0;
 
     for my $job (@{$jobs}) {
 
-        my ($valid, $message) = validate_job($job);
+        my ($valid, $message) =
+            validate_job($job);
 
         if ($valid) {
 
@@ -395,8 +423,7 @@ sub run_application {
             $job,
             $max_attempts,
             $log_file,
-            $test_results,
-            $success_rate
+            $executor
         );
 
         if ($success) {
@@ -455,12 +482,14 @@ sub main {
             }
             else {
 
-                $runtime_config = parse_cli();
+                $runtime_config =
+                    parse_cli();
             }
 
-            $exit_code = run_application(
-                $runtime_config
-            );
+            $exit_code =
+                run_application(
+                    $runtime_config
+                );
 
             1;
         }
@@ -482,7 +511,10 @@ sub main {
     return $exit_code;
 }
 
-# Only execute the application when run directly.
+# ------------------------------------------------------------
+# Direct execution guard
+# ------------------------------------------------------------
+
 unless (caller) {
     exit main();
 }

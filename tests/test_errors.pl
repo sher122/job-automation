@@ -5,19 +5,18 @@ use warnings;
 use Test::More;
 use FindBin qw($Bin);
 use File::Temp qw(tempdir);
-use File::Spec;
 
 require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
-# Test helper
+# Test helpers
 # ------------------------------------------------------------
 
-sub capture_stderr {
-    my ($code_ref) = @_;
+sub capture_main {
+    my ($config) = @_;
 
     my $stderr = "";
-    my $result;
+    my $exit_code;
 
     {
         local *STDERR;
@@ -25,345 +24,332 @@ sub capture_stderr {
         open(STDERR, ">", \$stderr)
             or die "Cannot capture STDERR: $!";
 
-        $result = $code_ref->();
+        $exit_code = main($config);
     }
 
-    return ($result, $stderr);
+    return ($exit_code, $stderr);
+}
+
+sub write_file {
+    my ($path, $content) = @_;
+
+    open(
+        my $handle,
+        ">",
+        $path
+    ) or die "Cannot create $path: $!";
+
+    print $handle $content;
+
+    close($handle);
 }
 
 # ------------------------------------------------------------
-# Create an isolated temporary test environment.
+# Test 1 and 2:
+# Missing job file
 # ------------------------------------------------------------
 
-my $test_directory = tempdir(CLEANUP => 1);
-
-my $log_directory = File::Spec->catdir(
-    $test_directory,
-    "logs"
-);
-
-my $log_file = File::Spec->catfile(
-    $log_directory,
-    "job_results.csv"
-);
-
-# ------------------------------------------------------------
-# Test 1:
-# Missing job file must return exit code 2.
-# ------------------------------------------------------------
-
-my $missing_job_file = File::Spec->catfile(
-    $test_directory,
-    "does_not_exist.json"
-);
-
-my ($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $missing_job_file,
-            log_directory => $log_directory,
-            log_file      => $log_file
-        });
-    }
-);
-
-is(
-    $exit_code,
-    2,
-    "Missing job file returns application error exit code 2"
-);
-
-like(
-    $stderr,
-    qr/Application error: Cannot open .*does_not_exist\.json/,
-    "Missing job file produces a human-readable error message"
-);
-
-# ------------------------------------------------------------
-# Test 2:
-# Malformed JSON must return exit code 2.
-# ------------------------------------------------------------
-
-my $malformed_job_file = File::Spec->catfile(
-    $test_directory,
-    "malformed.json"
-);
-
-open(my $malformed_handle, ">", $malformed_job_file)
-    or die "Cannot create malformed JSON fixture: $!";
-
-print $malformed_handle <<'JSON';
-[
-    {
-        "job_id": "BROKEN-001",
-        "priority": "high",
-        "type": "etch",
-        "submitted_at": "2026-08-13T10:00:00"
-    }
-JSON
-
-close($malformed_handle);
-
-($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $malformed_job_file,
-            log_directory => $log_directory,
-            log_file      => $log_file
-        });
-    }
-);
-
-is(
-    $exit_code,
-    2,
-    "Malformed JSON returns application error exit code 2"
-);
-
-like(
-    $stderr,
-    qr/Application error: Invalid JSON in .*malformed\.json:/,
-    "Malformed JSON produces a human-readable error message"
-);
-
-# ------------------------------------------------------------
-# Test 3:
-# Valid JSON syntax, but root element is not an array.
-# ------------------------------------------------------------
-
-my $wrong_root_job_file = File::Spec->catfile(
-    $test_directory,
-    "wrong_root.json"
-);
-
-open(my $wrong_root_handle, ">", $wrong_root_job_file)
-    or die "Cannot create wrong-root JSON fixture: $!";
-
-print $wrong_root_handle <<'JSON';
 {
-    "not": "an array"
+    my $temp_dir = tempdir(CLEANUP => 1);
+
+    my $missing_job_file =
+        "$temp_dir/does_not_exist.json";
+
+    my $log_directory =
+        "$temp_dir/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    my $config = {
+        job_file      => $missing_job_file,
+        log_directory => $log_directory,
+        log_file      => $log_file
+    };
+
+    my ($exit_code, $stderr) =
+        capture_main($config);
+
+    is(
+        $exit_code,
+        2,
+        "Missing job file returns application error exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Cannot open .*does_not_exist\.json/,
+        "Missing job file produces a human-readable error message"
+    );
 }
-JSON
-
-close($wrong_root_handle);
-
-($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $wrong_root_job_file,
-            log_directory => $log_directory,
-            log_file      => $log_file
-        });
-    }
-);
-
-is(
-    $exit_code,
-    2,
-    "Valid JSON with non-array root returns exit code 2"
-);
-
-like(
-    $stderr,
-    qr/root element must be a JSON array/,
-    "Wrong JSON root produces a clear application error"
-);
 
 # ------------------------------------------------------------
-# Test 4:
-# Log directory failure must return exit code 2.
+# Test 3 and 4:
+# Malformed JSON
+# ------------------------------------------------------------
+
+{
+    my $temp_dir = tempdir(CLEANUP => 1);
+
+    my $job_file =
+        "$temp_dir/malformed.json";
+
+    my $log_directory =
+        "$temp_dir/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    write_file(
+        $job_file,
+        '[{"job_id":"BAD-JSON","priority":"high"'
+    );
+
+    my $config = {
+        job_file      => $job_file,
+        log_directory => $log_directory,
+        log_file      => $log_file
+    };
+
+    my ($exit_code, $stderr) =
+        capture_main($config);
+
+    is(
+        $exit_code,
+        2,
+        "Malformed JSON returns application error exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Invalid JSON/,
+        "Malformed JSON produces a human-readable error message"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 5 and 6:
+# Valid JSON but incorrect root type.
+# ------------------------------------------------------------
+
+{
+    my $temp_dir = tempdir(CLEANUP => 1);
+
+    my $job_file =
+        "$temp_dir/object.json";
+
+    my $log_directory =
+        "$temp_dir/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    write_file(
+        $job_file,
+        '{"not":"an array"}'
+    );
+
+    my $config = {
+        job_file      => $job_file,
+        log_directory => $log_directory,
+        log_file      => $log_file
+    };
+
+    my ($exit_code, $stderr) =
+        capture_main($config);
+
+    is(
+        $exit_code,
+        2,
+        "Valid JSON with non-array root returns exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Invalid job file .*root element must be a JSON array/,
+        "Wrong JSON root produces a clear application error"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 7 and 8:
+# Log directory failure.
+# ------------------------------------------------------------
+
+{
+    my $temp_dir = tempdir(CLEANUP => 1);
+
+    my $job_file =
+        "$temp_dir/jobs.json";
+
+    my $blocked_parent =
+        "$temp_dir/blocked";
+
+    my $log_directory =
+        "$blocked_parent/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    write_file(
+        $job_file,
+        '[]'
+    );
+
+    # Create a file where the application expects a directory.
+    write_file(
+        $blocked_parent,
+        "not a directory"
+    );
+
+    my $config = {
+        job_file      => $job_file,
+        log_directory => $log_directory,
+        log_file      => $log_file
+    };
+
+    my ($exit_code, $stderr) =
+        capture_main($config);
+
+    is(
+        $exit_code,
+        2,
+        "Log directory failure returns application error exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Cannot create log directory/,
+        "Log directory failure produces a clear application error"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 9 and 10:
+# Job fails after maximum retry attempts.
 #
-# We deliberately create a FILE where the application expects
-# a DIRECTORY. mkdir() must therefore fail.
-# ------------------------------------------------------------
-
-my $invalid_log_directory = File::Spec->catfile(
-    $test_directory,
-    "not_a_directory"
-);
-
-open(my $fake_directory_handle, ">", $invalid_log_directory)
-    or die "Cannot create fake log directory: $!";
-
-print $fake_directory_handle "This is a file, not a directory.\n";
-
-close($fake_directory_handle);
-
-my $valid_for_log_failure = File::Spec->catfile(
-    $test_directory,
-    "valid_for_log_failure.json"
-);
-
-open(my $log_failure_job_handle, ">", $valid_for_log_failure)
-    or die "Cannot create log failure fixture: $!";
-
-print $log_failure_job_handle <<'JSON';
-[
-    {
-        "job_id": "LOG-FAIL-001",
-        "priority": "high",
-        "type": "etch",
-        "submitted_at": "2026-08-13T10:00:00"
-    }
-]
-JSON
-
-close($log_failure_job_handle);
-
-my $invalid_log_file = File::Spec->catfile(
-    $invalid_log_directory,
-    "job_results.csv"
-);
-
-($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $valid_for_log_failure,
-            log_directory => $invalid_log_directory,
-            log_file      => $invalid_log_file
-        });
-    }
-);
-
-is(
-    $exit_code,
-    2,
-    "Log directory failure returns application error exit code 2"
-);
-
-like(
-    $stderr,
-    qr/Application error: Cannot create log directory/,
-    "Log directory failure produces a clear application error"
-);
-
-# ------------------------------------------------------------
-# Test 5:
-# Job-level failure must return exit code 1.
+# IMPORTANT:
+# The executor is injected into the application.
 #
-# The application itself runs correctly.
-# The job fails all three attempts.
+# This replaces the old test_results mechanism.
 # ------------------------------------------------------------
 
-my $failed_job_file = File::Spec->catfile(
-    $test_directory,
-    "failed_job.json"
-);
+{
+    my $temp_dir = tempdir(CLEANUP => 1);
 
-open(my $failed_job_handle, ">", $failed_job_file)
-    or die "Cannot create failed-job fixture: $!";
+    my $job_file =
+        "$temp_dir/jobs.json";
 
-print $failed_job_handle <<'JSON';
+    my $log_directory =
+        "$temp_dir/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    write_file(
+        $job_file,
+        <<'JSON'
 [
     {
         "job_id": "FAILED-001",
         "priority": "high",
         "type": "etch",
-        "submitted_at": "2026-08-13T10:00:00"
+        "submitted_at": "2026-08-13T10:00:00Z"
     }
 ]
 JSON
+    );
 
-close($failed_job_handle);
+    # Deterministic executor:
+    # every execution fails.
+    my $fake_executor = sub {
+        my ($job) = @_;
 
-my $failed_log_directory = File::Spec->catdir(
-    $test_directory,
-    "failed_logs"
-);
+        return 0;
+    };
 
-my $failed_log_file = File::Spec->catfile(
-    $failed_log_directory,
-    "job_results.csv"
-);
+    my $config = {
+        job_file  => $job_file,
+        log_directory => $log_directory,
+        log_file  => $log_file,
+        executor  => $fake_executor
+    };
 
-($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $failed_job_file,
-            log_directory => $failed_log_directory,
-            log_file      => $failed_log_file,
+    my ($exit_code, $stderr) =
+        capture_main($config);
 
-            # Three deterministic failures.
-            test_results => [0, 0, 0]
-        });
-    }
-);
+    is(
+        $exit_code,
+        1,
+        "Job failure after maximum retries returns exit code 1"
+    );
 
-is(
-    $exit_code,
-    1,
-    "Job failure after maximum retries returns exit code 1"
-);
-
-is(
-    $stderr,
-    "",
-    "Job-level failure does not produce an application error"
-);
+    unlike(
+        $stderr,
+        qr/Application error:/,
+        "Job-level failure does not produce an application error"
+    );
+}
 
 # ------------------------------------------------------------
-# Test 6:
-# Successful application run must return exit code 0.
+# Test 11 and 12:
+# Successful application run.
 # ------------------------------------------------------------
 
-my $valid_job_file = File::Spec->catfile(
-    $test_directory,
-    "valid.json"
-);
+{
+    my $temp_dir = tempdir(CLEANUP => 1);
 
-open(my $valid_handle, ">", $valid_job_file)
-    or die "Cannot create valid JSON fixture: $!";
+    my $job_file =
+        "$temp_dir/jobs.json";
 
-print $valid_handle <<'JSON';
+    my $log_directory =
+        "$temp_dir/logs";
+
+    my $log_file =
+        "$log_directory/results.csv";
+
+    write_file(
+        $job_file,
+        <<'JSON'
 [
     {
         "job_id": "VALID-001",
         "priority": "critical",
         "type": "etch",
-        "submitted_at": "2026-08-13T10:00:00"
+        "submitted_at": "2026-08-13T10:00:00Z"
     }
 ]
 JSON
+    );
 
-close($valid_handle);
+    # Deterministic successful executor.
+    my $fake_executor = sub {
+        my ($job) = @_;
 
-my $valid_log_directory = File::Spec->catdir(
-    $test_directory,
-    "valid_logs"
-);
+        return 1;
+    };
 
-my $valid_log_file = File::Spec->catfile(
-    $valid_log_directory,
-    "job_results.csv"
-);
+    my $config = {
+        job_file  => $job_file,
+        log_directory => $log_directory,
+        log_file  => $log_file,
+        executor  => $fake_executor
+    };
 
-($exit_code, $stderr) = capture_stderr(
-    sub {
-        return main({
-            job_file      => $valid_job_file,
-            log_directory => $valid_log_directory,
-            log_file      => $valid_log_file,
+    my ($exit_code, $stderr) =
+        capture_main($config);
 
-            # Deterministic success.
-            test_results => [1]
-        });
-    }
-);
+    is(
+        $exit_code,
+        0,
+        "Successful run returns exit code 0"
+    );
 
-is(
-    $exit_code,
-    0,
-    "Successful run returns exit code 0"
-);
-
-is(
-    $stderr,
-    "",
-    "Successful run produces no application error"
-);
-
-# ------------------------------------------------------------
-# Finish.
-# ------------------------------------------------------------
+    unlike(
+        $stderr,
+        qr/Application error:/,
+        "Successful run produces no application error"
+    );
+}
 
 done_testing();
