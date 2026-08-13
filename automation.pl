@@ -112,6 +112,7 @@ sub process_with_retry {
         my $success = process_job($job);
 
         if ($success) {
+
             log_result(
                 $log_file,
                 $job,
@@ -140,143 +141,158 @@ sub process_with_retry {
 }
 
 # ------------------------------------------------------------
-# Program configuration
+# Main application
 # ------------------------------------------------------------
 
-my $project_name  = "Job Automation Tool";
-my $job_file      = "jobs/jobs.json";
-my $log_directory = "logs";
-my $log_file      = "$log_directory/job_results.csv";
+sub main {
 
-# ------------------------------------------------------------
-# Start program
-# ------------------------------------------------------------
+    # --------------------------------------------------------
+    # Program configuration
+    # --------------------------------------------------------
 
-print "Starting $project_name\n";
+    my $project_name  = "Job Automation Tool";
+    my $job_file      = "jobs/jobs.json";
+    my $log_directory = "logs";
+    my $log_file      = "$log_directory/job_results.csv";
 
-# ------------------------------------------------------------
-# Initialize log directory
-# ------------------------------------------------------------
+    # --------------------------------------------------------
+    # Start program
+    # --------------------------------------------------------
 
-unless (-d $log_directory) {
+    print "Starting $project_name\n";
 
-    mkdir($log_directory)
-        or die "Cannot create log directory $log_directory: $!\n";
-}
+    # --------------------------------------------------------
+    # Initialize log directory
+    # --------------------------------------------------------
 
-# ------------------------------------------------------------
-# Initialize log file
-# ------------------------------------------------------------
+    unless (-d $log_directory) {
 
-unless (-e $log_file) {
-
-    open(my $log_handle, ">", $log_file)
-        or die "Cannot create log file $log_file: $!\n";
-
-    print $log_handle
-        "timestamp,job_id,priority,type,attempt,status\n";
-
-    close($log_handle);
-}
-
-# ------------------------------------------------------------
-# Open job file
-# ------------------------------------------------------------
-
-open(my $file_handle, "<", $job_file)
-    or die "Cannot open $job_file: $!\n";
-
-local $/;
-
-my $json_text = <$file_handle>;
-
-close($file_handle);
-
-# ------------------------------------------------------------
-# Decode JSON
-# ------------------------------------------------------------
-
-my $jobs = decode_json($json_text);
-
-my $job_count = scalar(@{$jobs});
-
-print "Loaded $job_count jobs\n";
-
-# ------------------------------------------------------------
-# Validate jobs
-# ------------------------------------------------------------
-
-my @valid_jobs;
-my $invalid_job_count = 0;
-
-for my $job (@{$jobs}) {
-
-    my ($valid, $message) = validate_job($job);
-
-    if ($valid) {
-
-        push @valid_jobs, $job;
-
+        mkdir($log_directory)
+            or die "Cannot create log directory $log_directory: $!\n";
     }
-    else {
 
-        print "$job->{job_id}: INVALID - $message\n";
+    # --------------------------------------------------------
+    # Initialize log file
+    # --------------------------------------------------------
 
-        $invalid_job_count++;
+    unless (-e $log_file) {
+
+        open(my $log_handle, ">", $log_file)
+            or die "Cannot create log file $log_file: $!\n";
+
+        print $log_handle
+            "timestamp,job_id,priority,type,attempt,status\n";
+
+        close($log_handle);
     }
+
+    # --------------------------------------------------------
+    # Open job file
+    # --------------------------------------------------------
+
+    open(my $file_handle, "<", $job_file)
+        or die "Cannot open $job_file: $!\n";
+
+    local $/;
+
+    my $json_text = <$file_handle>;
+
+    close($file_handle);
+
+    # --------------------------------------------------------
+    # Decode JSON
+    # --------------------------------------------------------
+
+    my $jobs = decode_json($json_text);
+
+    my $job_count = scalar(@{$jobs});
+
+    print "Loaded $job_count jobs\n";
+
+    # --------------------------------------------------------
+    # Validate jobs
+    # --------------------------------------------------------
+
+    my @valid_jobs;
+    my $invalid_job_count = 0;
+
+    for my $job (@{$jobs}) {
+
+        my ($valid, $message) = validate_job($job);
+
+        if ($valid) {
+
+            push @valid_jobs, $job;
+
+        }
+        else {
+
+            print "$job->{job_id}: INVALID - $message\n";
+
+            $invalid_job_count++;
+        }
+    }
+
+    # --------------------------------------------------------
+    # Sort valid jobs by priority
+    # --------------------------------------------------------
+
+    @valid_jobs = sort {
+        $priority_order{$a->{priority}}
+            <=>
+        $priority_order{$b->{priority}}
+    } @valid_jobs;
+
+    # --------------------------------------------------------
+    # Process jobs
+    # --------------------------------------------------------
+
+    print "\nStarting job processing...\n";
+
+    my $successful_jobs = 0;
+    my $failed_jobs     = 0;
+    my $max_attempts    = 3;
+
+    for my $job (@valid_jobs) {
+
+        my $success = process_with_retry(
+            $job,
+            $max_attempts,
+            $log_file
+        );
+
+        if ($success) {
+            $successful_jobs++;
+        }
+        else {
+            $failed_jobs++;
+        }
+    }
+
+    # --------------------------------------------------------
+    # Processing summary
+    # --------------------------------------------------------
+
+    print "\nProcessing summary:\n";
+    print "Successful jobs: $successful_jobs\n";
+    print "Failed jobs:     $failed_jobs\n";
+    print "Invalid jobs:    $invalid_job_count\n";
+
+    # --------------------------------------------------------
+    # Exit status
+    # --------------------------------------------------------
+
+    if ($invalid_job_count > 0 || $failed_jobs > 0) {
+        return 1;
+    }
+
+    return 0;
 }
 
 # ------------------------------------------------------------
-# Sort valid jobs by priority
+# Run main only when this file is executed directly
 # ------------------------------------------------------------
 
-@valid_jobs = sort {
-    $priority_order{$a->{priority}}
-        <=>
-    $priority_order{$b->{priority}}
-} @valid_jobs;
-
-# ------------------------------------------------------------
-# Process jobs
-# ------------------------------------------------------------
-
-print "\nStarting job processing...\n";
-
-my $successful_jobs = 0;
-my $failed_jobs     = 0;
-my $max_attempts    = 3;
-
-for my $job (@valid_jobs) {
-
-    my $success = process_with_retry(
-        $job,
-        $max_attempts,
-        $log_file
-    );
-
-    if ($success) {
-        $successful_jobs++;
-    }
-    else {
-        $failed_jobs++;
-    }
+unless (caller) {
+    exit main();
 }
-
-# ------------------------------------------------------------
-# Processing summary
-# ------------------------------------------------------------
-
-print "\nProcessing summary:\n";
-print "Successful jobs: $successful_jobs\n";
-print "Failed jobs:     $failed_jobs\n";
-print "Invalid jobs:    $invalid_job_count\n";
-
-# ------------------------------------------------------------
-# Exit status
-# ------------------------------------------------------------
-
-if ($invalid_job_count > 0 || $failed_jobs > 0) {
-    exit 1;
-}
-
-exit 0;
