@@ -113,17 +113,59 @@ sub process_job {
     return 0;
 }
 
+# Escape one value according to CSV field rules.
+#
+# This is intentionally implemented manually for this learning project
+# to demonstrate understanding of CSV serialization.
+#
+# A production implementation should use a mature CSV library such as
+# Text::CSV_XS rather than maintaining custom CSV serialization logic.
+sub csv_escape {
+    my ($field) = @_;
+
+    # Convert undefined values to an empty field.
+    $field = "" unless defined $field;
+
+    # Determine whether quoting is required.
+    my $needs_quotes =
+           $field =~ /,/
+        || $field =~ /"/
+        || $field =~ /\n/;
+
+    # Fields containing none of the special characters can be
+    # returned unchanged.
+    return $field unless $needs_quotes;
+
+    # CSV represents a literal double quote by doubling it.
+    $field =~ s/"/""/g;
+
+    # Quote the complete field after escaping embedded quotes.
+    return qq{"$field"};
+}
+
 # Write one processing attempt to the CSV log.
 sub log_result {
     my ($log_file, $job, $attempt, $status) = @_;
 
     my $timestamp = scalar localtime();
 
+    my @fields = (
+        $timestamp,
+        $job->{job_id},
+        $job->{priority},
+        $job->{type},
+        $attempt,
+        $status
+    );
+
+    my @escaped_fields =
+        map { csv_escape($_) } @fields;
+
     open(my $log_handle, ">>", $log_file)
         or die "Cannot open log file $log_file: $!\n";
 
     print $log_handle
-        "$timestamp,$job->{job_id},$job->{priority},$job->{type},$attempt,$status\n";
+        join(",", @escaped_fields) . "\n";
 
     close($log_handle);
 }
@@ -173,9 +215,6 @@ sub process_with_retry {
 }
 
 # Run the application workflow.
-#
-# This function contains operations that may fail because of
-# filesystem or input errors.
 sub run_application {
     my ($runtime_config) = @_;
 
@@ -235,9 +274,6 @@ sub run_application {
 
             chomp $json_error;
 
-            # Remove the low-level Perl source location from the
-            # message. The application should report the problem,
-            # not expose an internal source-code location.
             $json_error =~ s/\s+at\s+.*\s+line\s+\d+\.\s*$//;
 
             die
@@ -325,7 +361,6 @@ sub run_application {
         return 1;
     }
 
-    # Exit code 0 means the application completed successfully.
     return 0;
 }
 
@@ -363,7 +398,6 @@ sub main {
         };
     }
 
-    # Application error.
     if (defined $error_message) {
 
         chomp $error_message;
@@ -378,8 +412,6 @@ sub main {
 }
 
 # Only execute the application when this file is run directly.
-#
-# When required by tests, main() is not automatically executed.
 unless (caller) {
     exit main();
 }
