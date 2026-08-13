@@ -24,6 +24,7 @@ my %default_config = (
     job_file      => "jobs/jobs.json",
     log_directory => "logs",
     log_file      => "logs/job_results.csv",
+    success_rate  => 0.80,
 );
 
 # ------------------------------------------------------------
@@ -36,11 +37,13 @@ sub parse_cli {
     my $job_file;
     my $log_file;
     my $log_directory;
+    my $success_rate;
 
     my $success = GetOptions(
         "job-file=s"      => \$job_file,
         "log-file=s"      => \$log_file,
-        "log-directory=s" => \$log_directory
+        "log-directory=s" => \$log_directory,
+        "success-rate=s"  => \$success_rate
     );
 
     unless ($success) {
@@ -62,6 +65,17 @@ sub parse_cli {
 
     if (defined $log_directory) {
         $config{log_directory} = $log_directory;
+    }
+
+    if (defined $success_rate) {
+
+        unless ($success_rate =~ /\A(?:0(?:\.\d+)?|1(?:\.0+)?)\z/) {
+            die
+                "Invalid success rate: $success_rate. " .
+                "Expected a value between 0.0 and 1.0\n";
+        }
+
+        $config{success_rate} = $success_rate + 0;
     }
 
     return \%config;
@@ -126,7 +140,7 @@ sub sort_jobs_by_priority {
 # ------------------------------------------------------------
 
 sub process_job {
-    my ($job, $test_results) = @_;
+    my ($job, $test_results, $success_rate) = @_;
 
     print "\nProcessing job $job->{job_id}\n";
     print "Priority: $job->{priority}\n";
@@ -151,7 +165,7 @@ sub process_job {
 
     sleep($processing_time);
 
-    if (rand() < 0.80) {
+    if (rand() < $success_rate) {
         print "Result: SUCCESS\n";
         return 1;
     }
@@ -217,15 +231,24 @@ sub log_result {
 # ------------------------------------------------------------
 
 sub process_with_retry {
-    my ($job, $max_attempts, $log_file, $test_results) = @_;
+    my (
+        $job,
+        $max_attempts,
+        $log_file,
+        $test_results,
+        $success_rate
+    ) = @_;
 
     for my $attempt (1 .. $max_attempts) {
 
-        print "\nAttempt $attempt/$max_attempts for $job->{job_id}\n";
+        print
+            "\nAttempt $attempt/$max_attempts " .
+            "for $job->{job_id}\n";
 
         my $success = process_job(
             $job,
-            $test_results
+            $test_results,
+            $success_rate
         );
 
         if ($success) {
@@ -271,6 +294,7 @@ sub run_application {
     my $log_directory = $runtime_config->{log_directory};
     my $log_file      = $runtime_config->{log_file};
     my $test_results  = $runtime_config->{test_results};
+    my $success_rate  = $runtime_config->{success_rate};
 
     print "Starting $project_name\n";
 
@@ -317,7 +341,8 @@ sub run_application {
 
             chomp $json_error;
 
-            $json_error =~ s/\s+at\s+.*\s+line\s+\d+\.\s*$//;
+            $json_error =~
+                s/\s+at\s+.*\s+line\s+\d+\.\s*$//;
 
             die
                 "Invalid JSON in $job_file: $json_error\n";
@@ -326,7 +351,8 @@ sub run_application {
 
     unless (ref($jobs) eq "ARRAY") {
         die
-            "Invalid job file $job_file: root element must be a JSON array\n";
+            "Invalid job file $job_file: " .
+            "root element must be a JSON array\n";
     }
 
     my $job_count = scalar(@{$jobs});
@@ -369,7 +395,8 @@ sub run_application {
             $job,
             $max_attempts,
             $log_file,
-            $test_results
+            $test_results,
+            $success_rate
         );
 
         if ($success) {
@@ -428,12 +455,6 @@ sub main {
             }
             else {
 
-                # CLI parsing is deliberately inside the same
-                # error boundary as application execution.
-                #
-                # This ensures invalid command-line input follows
-                # the same exit-code contract as other application
-                # errors.
                 $runtime_config = parse_cli();
             }
 
@@ -460,6 +481,7 @@ sub main {
 
     return $exit_code;
 }
+
 # Only execute the application when run directly.
 unless (caller) {
     exit main();

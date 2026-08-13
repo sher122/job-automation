@@ -74,7 +74,7 @@ require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
 # Test 3:
-# Unknown option must fail instead of silently using defaults.
+# Unknown option must fail at parser level.
 # ------------------------------------------------------------
 
 {
@@ -106,7 +106,7 @@ require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
 # Test 4:
-# Missing option value must fail.
+# Missing option value must fail at parser level.
 # ------------------------------------------------------------
 
 {
@@ -137,7 +137,7 @@ require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
 # Test 5:
-# Unexpected positional arguments must fail.
+# Unexpected positional argument must fail at parser level.
 # ------------------------------------------------------------
 
 {
@@ -168,10 +168,7 @@ require "$Bin/../automation.pl";
 
 # ------------------------------------------------------------
 # Test 6:
-# Public application interface must convert an invalid CLI
-# option into exit code 2.
-#
-# This is deliberately testing main(), not parse_cli().
+# Unknown option through the PUBLIC main() entry point.
 # ------------------------------------------------------------
 
 {
@@ -195,13 +192,84 @@ require "$Bin/../automation.pl";
     is(
         $exit_code,
         2,
-        "Invalid CLI option returns application error exit code 2"
+        "Unknown CLI option returns application error exit code 2"
     );
 
     like(
         $stderr,
         qr/Application error: Invalid command-line options/,
-        "Invalid CLI option produces a human-readable application error"
+        "Unknown CLI option produces a human-readable application error"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 7:
+# Missing option value through the PUBLIC main() entry point.
+# ------------------------------------------------------------
+
+{
+    local @ARGV = (
+        "--job-file"
+    );
+
+    my $stderr = "";
+    my $exit_code;
+
+    {
+        local *STDERR;
+
+        open(STDERR, ">", \$stderr)
+            or die "Cannot capture STDERR: $!";
+
+        $exit_code = main();
+    }
+
+    is(
+        $exit_code,
+        2,
+        "Missing CLI option value returns application error exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Invalid command-line options/,
+        "Missing CLI option value produces a human-readable application error"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 8:
+# Unexpected positional argument through the PUBLIC main()
+# entry point.
+# ------------------------------------------------------------
+
+{
+    local @ARGV = (
+        "unexpected-file.json"
+    );
+
+    my $stderr = "";
+    my $exit_code;
+
+    {
+        local *STDERR;
+
+        open(STDERR, ">", \$stderr)
+            or die "Cannot capture STDERR: $!";
+
+        $exit_code = main();
+    }
+
+    is(
+        $exit_code,
+        2,
+        "Unexpected positional argument returns application error exit code 2"
+    );
+
+    like(
+        $stderr,
+        qr/Application error: Unexpected command-line argument/,
+        "Unexpected positional argument produces a human-readable application error"
     );
 }
 
