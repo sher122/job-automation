@@ -81,11 +81,28 @@ sub process_job {
 }
 
 # ------------------------------------------------------------
+# Log a job processing result
+# ------------------------------------------------------------
+
+sub log_result {
+    my ($log_file, $job, $attempt, $status) = @_;
+
+    my $timestamp = scalar localtime();
+
+    open(my $log_handle, ">>", $log_file)
+        or die "Cannot open log file $log_file: $!\n";
+
+    print $log_handle "$timestamp,$job->{job_id},$job->{priority},$job->{type},$attempt,$status\n";
+
+    close($log_handle);
+}
+
+# ------------------------------------------------------------
 # Process a job with retry logic
 # ------------------------------------------------------------
 
 sub process_with_retry {
-    my ($job, $max_attempts) = @_;
+    my ($job, $max_attempts, $log_file) = @_;
 
     for my $attempt (1 .. $max_attempts) {
 
@@ -94,8 +111,11 @@ sub process_with_retry {
         my $success = process_job($job);
 
         if ($success) {
+            log_result($log_file, $job, $attempt, "SUCCESS");
             return 1;
         }
+
+        log_result($log_file, $job, $attempt, "FAILURE");
 
         if ($attempt < $max_attempts) {
             print "Job $job->{job_id} failed. Retrying...\n";
@@ -113,6 +133,8 @@ sub process_with_retry {
 
 my $project_name = "Job Automation Tool";
 my $job_file     = "jobs/jobs.json";
+my $log_directory = "logs";
+my $log_file     = "logs/job_results.csv";
 
 # ------------------------------------------------------------
 # Start program
@@ -120,6 +142,29 @@ my $job_file     = "jobs/jobs.json";
 
 print "Starting $project_name\n";
 
+# ------------------------------------------------------------
+# Initialize log directory
+# ------------------------------------------------------------
+
+unless (-d $log_directory) {
+
+    mkdir($log_directory)
+        or die "Cannot create log directory $log_directory: $!\n";
+}
+
+# ------------------------------------------------------------
+# Initialize log file
+# ------------------------------------------------------------
+
+unless (-e $log_file) {
+
+    open(my $log_handle, ">", $log_file)
+        or die "Cannot create log file $log_file: $!\n";
+
+    print $log_handle "timestamp,job_id,priority,type,attempt,status\n";
+
+    close($log_handle);
+}
 # ------------------------------------------------------------
 # Open job file
 # ------------------------------------------------------------
@@ -183,7 +228,11 @@ my $max_attempts    = 3;
 
 for my $job (@valid_jobs) {
 
-    my $success = process_with_retry($job, $max_attempts);
+    my $success = process_with_retry(
+        $job,
+        $max_attempts,
+        $log_file
+    );
 
     if ($success) {
         $successful_jobs++;
