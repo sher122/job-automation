@@ -7,6 +7,8 @@ use Time::HiRes qw(sleep);
 
 # ------------------------------------------------------------
 # Priority configuration
+#
+# Lower number = higher priority.
 # ------------------------------------------------------------
 
 my %priority_order = (
@@ -31,6 +33,7 @@ sub validate_job {
     );
 
     for my $field (@required_fields) {
+
         unless (exists $job->{$field}) {
             return (0, "Missing required field: $field");
         }
@@ -44,20 +47,44 @@ sub validate_job {
     );
 
     unless (exists $valid_priorities{$job->{priority}}) {
-        return (0, "Invalid priority: $job->{priority}");
+
+        return (
+            0,
+            "Invalid priority: $job->{priority}"
+        );
     }
 
     return (1, "Valid");
 }
 
 # ------------------------------------------------------------
+# Sort jobs by priority
+#
+# Priority order:
+#
+# critical → high → medium → low
+# ------------------------------------------------------------
+
+sub sort_jobs_by_priority {
+    my (@jobs) = @_;
+
+    my @sorted_jobs = sort {
+        $priority_order{$a->{priority}}
+            <=>
+        $priority_order{$b->{priority}}
+    } @jobs;
+
+    return @sorted_jobs;
+}
+
+# ------------------------------------------------------------
 # Simulate processing a single job
 #
 # Normal execution:
-#   Uses random success/failure.
+#   Random success/failure.
 #
 # Testing:
-#   Uses an injected array of predetermined results.
+#   Optional deterministic result sequence.
 #   0 = FAILURE
 #   1 = SUCCESS
 # ------------------------------------------------------------
@@ -70,11 +97,7 @@ sub process_job {
     print "Type: $job->{type}\n";
 
     # --------------------------------------------------------
-    # Testing mode
-    #
-    # Tests should be fast. We therefore skip the simulated
-    # processing delay when deterministic test results are
-    # supplied.
+    # Deterministic testing mode
     # --------------------------------------------------------
 
     if (defined $test_results && @{$test_results}) {
@@ -82,11 +105,14 @@ sub process_job {
         my $test_result = shift @{$test_results};
 
         if ($test_result) {
+
             print "Result: SUCCESS\n";
+
             return 1;
         }
 
         print "Result: FAILURE\n";
+
         return 0;
     }
 
@@ -101,14 +127,18 @@ sub process_job {
     sleep($processing_time);
 
     # Approximately 80% success rate
+
     my $result = rand();
 
     if ($result < 0.80) {
+
         print "Result: SUCCESS\n";
+
         return 1;
     }
 
     print "Result: FAILURE\n";
+
     return 0;
 }
 
@@ -144,9 +174,14 @@ sub process_with_retry {
         my $success;
 
         if (defined $test_results) {
-            $success = process_job($job, $test_results);
+
+            $success = process_job(
+                $job,
+                $test_results
+            );
         }
         else {
+
             $success = process_job($job);
         }
 
@@ -178,7 +213,9 @@ sub process_with_retry {
         );
 
         if ($attempt < $max_attempts) {
-            print "Job $job->{job_id} failed. Retrying...\n";
+
+            print
+                "Job $job->{job_id} failed. Retrying...\n";
         }
     }
 
@@ -186,7 +223,8 @@ sub process_with_retry {
     # Maximum attempts exhausted
     # --------------------------------------------------------
 
-    print "Job $job->{job_id} failed after $max_attempts attempts.\n";
+    print
+        "Job $job->{job_id} failed after $max_attempts attempts.\n";
 
     return 0;
 }
@@ -213,23 +251,25 @@ sub main {
     print "Starting $project_name\n";
 
     # --------------------------------------------------------
-    # Create log directory if necessary
+    # Create log directory
     # --------------------------------------------------------
 
     unless (-d $log_directory) {
 
         mkdir($log_directory)
-            or die "Cannot create log directory $log_directory: $!\n";
+            or die
+                "Cannot create log directory $log_directory: $!\n";
     }
 
     # --------------------------------------------------------
-    # Create log file if necessary
+    # Create log file
     # --------------------------------------------------------
 
     unless (-e $log_file) {
 
         open(my $log_handle, ">", $log_file)
-            or die "Cannot create log file $log_file: $!\n";
+            or die
+                "Cannot create log file $log_file: $!\n";
 
         print $log_handle
             "timestamp,job_id,priority,type,attempt,status\n";
@@ -242,7 +282,8 @@ sub main {
     # --------------------------------------------------------
 
     open(my $file_handle, "<", $job_file)
-        or die "Cannot open $job_file: $!\n";
+        or die
+            "Cannot open $job_file: $!\n";
 
     local $/;
 
@@ -265,6 +306,7 @@ sub main {
     # --------------------------------------------------------
 
     my @valid_jobs;
+
     my $invalid_job_count = 0;
 
     for my $job (@{$jobs}) {
@@ -277,21 +319,19 @@ sub main {
         }
         else {
 
-            print "$job->{job_id}: INVALID - $message\n";
+            print
+                "$job->{job_id}: INVALID - $message\n";
 
             $invalid_job_count++;
         }
     }
 
     # --------------------------------------------------------
-    # Sort jobs by priority
+    # Sort valid jobs by priority
     # --------------------------------------------------------
 
-    @valid_jobs = sort {
-        $priority_order{$a->{priority}}
-            <=>
-        $priority_order{$b->{priority}}
-    } @valid_jobs;
+    @valid_jobs =
+        sort_jobs_by_priority(@valid_jobs);
 
     # --------------------------------------------------------
     # Process jobs
@@ -312,9 +352,11 @@ sub main {
         );
 
         if ($success) {
+
             $successful_jobs++;
         }
         else {
+
             $failed_jobs++;
         }
     }
@@ -324,9 +366,15 @@ sub main {
     # --------------------------------------------------------
 
     print "\nProcessing summary:\n";
-    print "Successful jobs: $successful_jobs\n";
-    print "Failed jobs:     $failed_jobs\n";
-    print "Invalid jobs:    $invalid_job_count\n";
+
+    print
+        "Successful jobs: $successful_jobs\n";
+
+    print
+        "Failed jobs:     $failed_jobs\n";
+
+    print
+        "Invalid jobs:    $invalid_job_count\n";
 
     # --------------------------------------------------------
     # Application exit status
@@ -335,7 +383,12 @@ sub main {
     # 1 = job/application failure
     # --------------------------------------------------------
 
-    if ($invalid_job_count > 0 || $failed_jobs > 0) {
+    if (
+        $invalid_job_count > 0
+        ||
+        $failed_jobs > 0
+    ) {
+
         return 1;
     }
 
@@ -343,12 +396,13 @@ sub main {
 }
 
 # ------------------------------------------------------------
-# Execute main() only when this file is run directly.
+# Execute main() only when the file is run directly.
 #
 # This allows test files to load the functions without
-# automatically starting the entire application.
+# automatically starting the application.
 # ------------------------------------------------------------
 
 unless (caller) {
+
     exit main();
 }
