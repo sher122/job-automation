@@ -4,6 +4,12 @@ use strict;
 use warnings;
 use JSON::PP;
 use Time::HiRes qw(sleep);
+use Getopt::Long qw(GetOptions);
+
+Getopt::Long::Configure(
+    "no_ignore_case",
+    "no_auto_abbrev"
+);
 
 # Priority ranking: lower number means higher priority.
 my %priority_order = (
@@ -20,7 +26,51 @@ my %default_config = (
     log_file      => "logs/job_results.csv",
 );
 
-# Validate one job record.
+# ------------------------------------------------------------
+# Command-line configuration
+# ------------------------------------------------------------
+
+sub parse_cli {
+    my %config = %default_config;
+
+    my $job_file;
+    my $log_file;
+    my $log_directory;
+
+    my $success = GetOptions(
+        "job-file=s"      => \$job_file,
+        "log-file=s"      => \$log_file,
+        "log-directory=s" => \$log_directory
+    );
+
+    unless ($success) {
+        die "Invalid command-line options\n";
+    }
+
+    if (@ARGV) {
+        die
+            "Unexpected command-line argument: $ARGV[0]\n";
+    }
+
+    if (defined $job_file) {
+        $config{job_file} = $job_file;
+    }
+
+    if (defined $log_file) {
+        $config{log_file} = $log_file;
+    }
+
+    if (defined $log_directory) {
+        $config{log_directory} = $log_directory;
+    }
+
+    return \%config;
+}
+
+# ------------------------------------------------------------
+# Job validation
+# ------------------------------------------------------------
+
 sub validate_job {
     my ($job) = @_;
 
@@ -55,7 +105,10 @@ sub validate_job {
     return (1, "Valid");
 }
 
-# Sort jobs from highest to lowest priority.
+# ------------------------------------------------------------
+# Priority sorting
+# ------------------------------------------------------------
+
 sub sort_jobs_by_priority {
     my (@jobs) = @_;
 
@@ -68,15 +121,10 @@ sub sort_jobs_by_priority {
     return @sorted_jobs;
 }
 
-# Simulate processing one job.
-#
-# During tests, an optional array reference can provide deterministic
-# results:
-#
-# 0 = FAILURE
-# 1 = SUCCESS
-#
-# Normal execution uses random success/failure.
+# ------------------------------------------------------------
+# Job processing
+# ------------------------------------------------------------
+
 sub process_job {
     my ($job, $test_results) = @_;
 
@@ -113,37 +161,31 @@ sub process_job {
     return 0;
 }
 
-# Escape one value according to CSV field rules.
-#
-# This is intentionally implemented manually for this learning project
-# to demonstrate understanding of CSV serialization.
-#
-# A production implementation should use a mature CSV library such as
-# Text::CSV_XS rather than maintaining custom CSV serialization logic.
+# ------------------------------------------------------------
+# CSV serialization
+# ------------------------------------------------------------
+
 sub csv_escape {
     my ($field) = @_;
 
-    # Convert undefined values to an empty field.
     $field = "" unless defined $field;
 
-    # Determine whether quoting is required.
     my $needs_quotes =
            $field =~ /,/
         || $field =~ /"/
         || $field =~ /\n/;
 
-    # Fields containing none of the special characters can be
-    # returned unchanged.
     return $field unless $needs_quotes;
 
-    # CSV represents a literal double quote by doubling it.
     $field =~ s/"/""/g;
 
-    # Quote the complete field after escaping embedded quotes.
     return qq{"$field"};
 }
 
-# Write one processing attempt to the CSV log.
+# ------------------------------------------------------------
+# CSV logging
+# ------------------------------------------------------------
+
 sub log_result {
     my ($log_file, $job, $attempt, $status) = @_;
 
@@ -170,7 +212,10 @@ sub log_result {
     close($log_handle);
 }
 
-# Process a job with a bounded retry policy.
+# ------------------------------------------------------------
+# Retry processing
+# ------------------------------------------------------------
+
 sub process_with_retry {
     my ($job, $max_attempts, $log_file, $test_results) = @_;
 
@@ -214,7 +259,10 @@ sub process_with_retry {
     return 0;
 }
 
-# Run the application workflow.
+# ------------------------------------------------------------
+# Main application workflow
+# ------------------------------------------------------------
+
 sub run_application {
     my ($runtime_config) = @_;
 
@@ -226,7 +274,6 @@ sub run_application {
 
     print "Starting $project_name\n";
 
-    # Create the log directory if necessary.
     unless (-d $log_directory) {
 
         mkdir($log_directory)
@@ -234,7 +281,6 @@ sub run_application {
                 "Cannot create log directory $log_directory: $!\n";
     }
 
-    # Create the log file if necessary.
     unless (-e $log_file) {
 
         open(my $log_handle, ">", $log_file)
@@ -247,7 +293,6 @@ sub run_application {
         close($log_handle);
     }
 
-    # Read the job file.
     open(my $file_handle, "<", $job_file)
         or die
             "Cannot open $job_file: $!\n";
@@ -258,8 +303,6 @@ sub run_application {
 
     close($file_handle);
 
-    # Parse JSON inside its own error boundary so that we can
-    # provide a useful application-level message.
     my $jobs;
 
     {
@@ -281,7 +324,6 @@ sub run_application {
         };
     }
 
-    # The job file must contain a JSON array.
     unless (ref($jobs) eq "ARRAY") {
         die
             "Invalid job file $job_file: root element must be a JSON array\n";
@@ -291,7 +333,6 @@ sub run_application {
 
     print "Loaded $job_count jobs\n";
 
-    # Validate jobs.
     my @valid_jobs;
 
     my $invalid_job_count = 0;
@@ -313,7 +354,6 @@ sub run_application {
         }
     }
 
-    # Sort valid jobs by priority.
     @valid_jobs =
         sort_jobs_by_priority(@valid_jobs);
 
@@ -351,8 +391,6 @@ sub run_application {
     print
         "Invalid jobs:    $invalid_job_count\n";
 
-    # Exit code 1 means the application completed, but
-    # the job run contained invalid or failed jobs.
     if (
         $invalid_job_count > 0
         ||
@@ -364,21 +402,12 @@ sub run_application {
     return 0;
 }
 
-# Public application entry point.
-#
-# Runtime/application errors are converted into exit code 2.
+# ------------------------------------------------------------
+# Public application entry point
+# ------------------------------------------------------------
+
 sub main {
     my ($config) = @_;
-
-    my %runtime_config = %default_config;
-
-    if (defined $config) {
-
-        %runtime_config = (
-            %runtime_config,
-            %{$config}
-        );
-    }
 
     my $exit_code;
     my $error_message;
@@ -387,8 +416,29 @@ sub main {
         local $@;
 
         eval {
+
+            my $runtime_config;
+
+            if (defined $config) {
+
+                $runtime_config = {
+                    %default_config,
+                    %{$config}
+                };
+            }
+            else {
+
+                # CLI parsing is deliberately inside the same
+                # error boundary as application execution.
+                #
+                # This ensures invalid command-line input follows
+                # the same exit-code contract as other application
+                # errors.
+                $runtime_config = parse_cli();
+            }
+
             $exit_code = run_application(
-                \%runtime_config
+                $runtime_config
             );
 
             1;
@@ -410,8 +460,7 @@ sub main {
 
     return $exit_code;
 }
-
-# Only execute the application when this file is run directly.
+# Only execute the application when run directly.
 unless (caller) {
     exit main();
 }
