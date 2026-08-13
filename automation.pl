@@ -52,23 +52,55 @@ sub validate_job {
 
 # ------------------------------------------------------------
 # Simulate processing a single job
+#
+# Normal execution:
+#   Uses random success/failure.
+#
+# Testing:
+#   Uses an injected array of predetermined results.
+#   0 = FAILURE
+#   1 = SUCCESS
 # ------------------------------------------------------------
 
 sub process_job {
-    my ($job) = @_;
+    my ($job, $test_results) = @_;
 
     print "\nProcessing job $job->{job_id}\n";
     print "Priority: $job->{priority}\n";
     print "Type: $job->{type}\n";
 
-    # Simulate processing time between 1 and 3 seconds
+    # --------------------------------------------------------
+    # Testing mode
+    #
+    # Tests should be fast. We therefore skip the simulated
+    # processing delay when deterministic test results are
+    # supplied.
+    # --------------------------------------------------------
+
+    if (defined $test_results && @{$test_results}) {
+
+        my $test_result = shift @{$test_results};
+
+        if ($test_result) {
+            print "Result: SUCCESS\n";
+            return 1;
+        }
+
+        print "Result: FAILURE\n";
+        return 0;
+    }
+
+    # --------------------------------------------------------
+    # Normal simulation mode
+    # --------------------------------------------------------
+
     my $processing_time = 1 + int(rand(3));
 
     print "Processing for $processing_time seconds...\n";
 
     sleep($processing_time);
 
-    # Simulate approximately 80% success rate
+    # Approximately 80% success rate
     my $result = rand();
 
     if ($result < 0.80) {
@@ -103,13 +135,24 @@ sub log_result {
 # ------------------------------------------------------------
 
 sub process_with_retry {
-    my ($job, $max_attempts, $log_file) = @_;
+    my ($job, $max_attempts, $log_file, $test_results) = @_;
 
     for my $attempt (1 .. $max_attempts) {
 
         print "\nAttempt $attempt/$max_attempts for $job->{job_id}\n";
 
-        my $success = process_job($job);
+        my $success;
+
+        if (defined $test_results) {
+            $success = process_job($job, $test_results);
+        }
+        else {
+            $success = process_job($job);
+        }
+
+        # ----------------------------------------------------
+        # Successful attempt
+        # ----------------------------------------------------
 
         if ($success) {
 
@@ -123,6 +166,10 @@ sub process_with_retry {
             return 1;
         }
 
+        # ----------------------------------------------------
+        # Failed attempt
+        # ----------------------------------------------------
+
         log_result(
             $log_file,
             $job,
@@ -134,6 +181,10 @@ sub process_with_retry {
             print "Job $job->{job_id} failed. Retrying...\n";
         }
     }
+
+    # --------------------------------------------------------
+    # Maximum attempts exhausted
+    # --------------------------------------------------------
 
     print "Job $job->{job_id} failed after $max_attempts attempts.\n";
 
@@ -147,7 +198,7 @@ sub process_with_retry {
 sub main {
 
     # --------------------------------------------------------
-    # Program configuration
+    # Configuration
     # --------------------------------------------------------
 
     my $project_name  = "Job Automation Tool";
@@ -156,13 +207,13 @@ sub main {
     my $log_file      = "$log_directory/job_results.csv";
 
     # --------------------------------------------------------
-    # Start program
+    # Start application
     # --------------------------------------------------------
 
     print "Starting $project_name\n";
 
     # --------------------------------------------------------
-    # Initialize log directory
+    # Create log directory if necessary
     # --------------------------------------------------------
 
     unless (-d $log_directory) {
@@ -172,7 +223,7 @@ sub main {
     }
 
     # --------------------------------------------------------
-    # Initialize log file
+    # Create log file if necessary
     # --------------------------------------------------------
 
     unless (-e $log_file) {
@@ -187,7 +238,7 @@ sub main {
     }
 
     # --------------------------------------------------------
-    # Open job file
+    # Open job input
     # --------------------------------------------------------
 
     open(my $file_handle, "<", $job_file)
@@ -223,7 +274,6 @@ sub main {
         if ($valid) {
 
             push @valid_jobs, $job;
-
         }
         else {
 
@@ -234,7 +284,7 @@ sub main {
     }
 
     # --------------------------------------------------------
-    # Sort valid jobs by priority
+    # Sort jobs by priority
     # --------------------------------------------------------
 
     @valid_jobs = sort {
@@ -279,7 +329,10 @@ sub main {
     print "Invalid jobs:    $invalid_job_count\n";
 
     # --------------------------------------------------------
-    # Exit status
+    # Application exit status
+    #
+    # 0 = success
+    # 1 = job/application failure
     # --------------------------------------------------------
 
     if ($invalid_job_count > 0 || $failed_jobs > 0) {
@@ -290,7 +343,10 @@ sub main {
 }
 
 # ------------------------------------------------------------
-# Run main only when this file is executed directly
+# Execute main() only when this file is run directly.
+#
+# This allows test files to load the functions without
+# automatically starting the entire application.
 # ------------------------------------------------------------
 
 unless (caller) {
