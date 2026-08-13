@@ -139,5 +139,41 @@ like(
     qr/^[^,]+,CSV-001,high,"etch, plasma",1,SUCCESS$/,
     "CSV record retains the expected six-field structure"
 );
+# ------------------------------------------------------------
+# Test 9:
+# A field containing a carriage return must be quoted.
+#
+# This specifically tests \r rather than relying on the
+# existing newline test to cover all line-ending cases.
+# ------------------------------------------------------------
 
+{
+    my $value = "etch\rplasma";
+
+    my $escaped = csv_escape($value);
+
+    is(
+        $escaped,
+        "\"etch\rplasma\"",
+        "Field containing carriage return is quoted"
+    );
+}
+
+# ------------------------------------------------------------
+# Test 10:
+# A field containing carriage return and comma must preserve
+# both characters while remaining a single CSV field.
+# ------------------------------------------------------------
+
+{
+    my $value = "etch,\rplasma";
+
+    my $escaped = csv_escape($value);
+
+    is(
+        $escaped,
+        "\"etch,\rplasma\"",
+        "Carriage return and comma are escaped together"
+    );
+}
 done_testing();

@@ -198,22 +198,27 @@ sub process_job {
 # ------------------------------------------------------------
 
 sub csv_escape {
-    my ($field) = @_;
+    my ($value) = @_;
 
-    $field = "" unless defined $field;
+    return "" unless defined $value;
 
+    # CSV requires quoting when a field contains:
+    # - comma
+    # - double quote
+    # - newline
+    # - carriage return
     my $needs_quotes =
-           $field =~ /,/
-        || $field =~ /"/
-        || $field =~ /\n/;
+        $value =~ /[,"\r\n]/;
 
-    return $field unless $needs_quotes;
+    # Escape embedded double quotes by doubling them.
+    $value =~ s/"/""/g;
 
-    $field =~ s/"/""/g;
+    if ($needs_quotes) {
+        return qq{"$value"};
+    }
 
-    return qq{"$field"};
+    return $value;
 }
-
 # ------------------------------------------------------------
 # CSV logging
 # ------------------------------------------------------------
