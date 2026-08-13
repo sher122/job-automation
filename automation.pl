@@ -92,7 +92,8 @@ sub log_result {
     open(my $log_handle, ">>", $log_file)
         or die "Cannot open log file $log_file: $!\n";
 
-    print $log_handle "$timestamp,$job->{job_id},$job->{priority},$job->{type},$attempt,$status\n";
+    print $log_handle
+        "$timestamp,$job->{job_id},$job->{priority},$job->{type},$attempt,$status\n";
 
     close($log_handle);
 }
@@ -111,11 +112,22 @@ sub process_with_retry {
         my $success = process_job($job);
 
         if ($success) {
-            log_result($log_file, $job, $attempt, "SUCCESS");
+            log_result(
+                $log_file,
+                $job,
+                $attempt,
+                "SUCCESS"
+            );
+
             return 1;
         }
 
-        log_result($log_file, $job, $attempt, "FAILURE");
+        log_result(
+            $log_file,
+            $job,
+            $attempt,
+            "FAILURE"
+        );
 
         if ($attempt < $max_attempts) {
             print "Job $job->{job_id} failed. Retrying...\n";
@@ -131,10 +143,10 @@ sub process_with_retry {
 # Program configuration
 # ------------------------------------------------------------
 
-my $project_name = "Job Automation Tool";
-my $job_file     = "jobs/jobs.json";
+my $project_name  = "Job Automation Tool";
+my $job_file      = "jobs/jobs.json";
 my $log_directory = "logs";
-my $log_file     = "logs/job_results.csv";
+my $log_file      = "$log_directory/job_results.csv";
 
 # ------------------------------------------------------------
 # Start program
@@ -161,10 +173,12 @@ unless (-e $log_file) {
     open(my $log_handle, ">", $log_file)
         or die "Cannot create log file $log_file: $!\n";
 
-    print $log_handle "timestamp,job_id,priority,type,attempt,status\n";
+    print $log_handle
+        "timestamp,job_id,priority,type,attempt,status\n";
 
     close($log_handle);
 }
+
 # ------------------------------------------------------------
 # Open job file
 # ------------------------------------------------------------
@@ -193,16 +207,22 @@ print "Loaded $job_count jobs\n";
 # ------------------------------------------------------------
 
 my @valid_jobs;
+my $invalid_job_count = 0;
 
 for my $job (@{$jobs}) {
 
     my ($valid, $message) = validate_job($job);
 
     if ($valid) {
+
         push @valid_jobs, $job;
+
     }
     else {
+
         print "$job->{job_id}: INVALID - $message\n";
+
+        $invalid_job_count++;
     }
 }
 
@@ -249,3 +269,14 @@ for my $job (@valid_jobs) {
 print "\nProcessing summary:\n";
 print "Successful jobs: $successful_jobs\n";
 print "Failed jobs:     $failed_jobs\n";
+print "Invalid jobs:    $invalid_job_count\n";
+
+# ------------------------------------------------------------
+# Exit status
+# ------------------------------------------------------------
+
+if ($invalid_job_count > 0 || $failed_jobs > 0) {
+    exit 1;
+}
+
+exit 0;
