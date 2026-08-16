@@ -19,7 +19,7 @@ A Perl-based job processing engine that validates jobs, schedules them by priori
 
 ## Why This Project
 
-Most "automation script" portfolio pieces stop at "it runs." This one is built the way a production tool would need to be: it has a defined contract for how it reports success/failure to whatever calls it (a shell script, a scheduler, a CI pipeline), it's tested against real failure conditions (missing files, malformed input, filesystem errors) — not just the happy path, and its test suite uses dependency injection so retry and failure behavior can be verified deterministically instead of relying on chance.
+Most "automation script" portfolio pieces stop at "it runs." This one is built the way a production tool would need to be: it has a defined contract for how it reports success/failure to whatever calls it (a shell script, a scheduler), it's tested against real failure conditions (missing files, malformed input, filesystem errors) — not just the happy path, and its test suite uses dependency injection so retry and failure behavior can be verified deterministically instead of relying on chance.
 
 ---
 
@@ -48,8 +48,6 @@ With options:
 ```powershell
 perl automation.pl --job-file jobs\jobs.json --success-rate 0.8
 ```
-
-Full CLI reference and test-by-test breakdown are in [`DETAILS.md`](DETAILS.md).
 
 ---
 
